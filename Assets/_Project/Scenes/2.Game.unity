@@ -1834,8 +1834,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _tilePool: {fileID: 388316491}
-  _spawnParent: {fileID: 1263796231}
+  _rowsRoot: {fileID: 1263796231}
   _containerRect: {fileID: 1263796231}
+  _canvas: {fileID: 0}
 --- !u!4 &1127512736
 Transform:
   m_ObjectHideFlags: 0

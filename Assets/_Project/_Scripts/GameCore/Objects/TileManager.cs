@@ -6,83 +6,140 @@ namespace GameCore.Objects
     public class TileManager : MonoBehaviour
     {
         [SerializeField] private ObjectPool _tilePool;
-        [SerializeField] private Transform _spawnParent;
+
+        // ВАЖНО: это RectTransform, внутри которого лежат все тайлы (одна “лента”)
+        [SerializeField] private RectTransform _rowsRoot;
+
+        // Видимая область/контейнер (Viewport), относительно которой считаем верх/низ
         [SerializeField] private RectTransform _containerRect;
 
-        private readonly float _baseTileSpeed = 1000f;
-        private readonly int _tilesPerRow = 3;
-        private readonly int _tilesPerColumn = 4;
+        [SerializeField] private Canvas _canvas;
 
-        private float _tileSpeed;
+        private const float BaseTileSpeed = 1000f;
+        private const int TilesPerRow = 3;
+        private const int TilesPerColumn = 4;
+
+        private float _speed;
+
         private float _tileWidth;
         private float _tileHeight;
-        private float _spawnInterval;
-        private float _spawnTimer;
 
-        private readonly List<Tile> _activeTiles = new();
+        // позиция следующего ряда в локальных координатах rowsRoot
+        private float _nextRowY;
+
+        // список рядов: каждый ряд = список Tile
+        private readonly Queue<List<Tile>> _rows = new();
 
         private void Start()
         {
-            float containerWidth = _containerRect.rect.width;
-            float containerHeight = _containerRect.rect.height;
+            _tileWidth = _containerRect.rect.width / TilesPerRow;
+            _tileHeight = _containerRect.rect.height / TilesPerColumn;
 
-            _tileWidth = containerWidth / _tilesPerRow;
-            _tileHeight = containerHeight / _tilesPerColumn;
+            SnapSizesToPixelGrid();
         }
 
         public void OnGameStart()
         {
-            _spawnTimer = 0f;
+            ClearAllRows();
 
             float difficultyMultiplier = GameManager.Instance.GetSpawnIntervalMultiplier();
+            _speed = BaseTileSpeed * difficultyMultiplier;
 
-            _tileSpeed = _baseTileSpeed * difficultyMultiplier;
+            _rowsRoot.anchoredPosition = Vector2.zero;
 
-            _spawnInterval = _tileHeight / _tileSpeed;
-            _spawnInterval *= 0.985f;
+            float topYInContainer = _containerRect.rect.height / 2f + _tileHeight / 2f;
+
+            _nextRowY = topYInContainer;
+
+            int initialRows = TilesPerColumn + 2;
+            for (int i = 0; i < initialRows; i++)
+            {
+                SpawnRowAt(_nextRowY);
+                _nextRowY += _tileHeight;
+            }
         }
 
         private void Update()
         {
             if (!GameManager.Instance.IsGameActive) return;
 
-            _spawnTimer += Time.deltaTime;
+            var p = _rowsRoot.anchoredPosition;
+            p.y -= _speed * Time.deltaTime;
 
-            while (_spawnTimer >= _spawnInterval)
+            p.y = SnapToPixel(p.y);
+            _rowsRoot.anchoredPosition = p;
+
+            float topVisibleY = _containerRect.rect.height / 2f;
+
+            while (_nextRowY + _rowsRoot.anchoredPosition.y < topVisibleY + _tileHeight)
             {
-                _spawnTimer -= _spawnInterval;
-                SpawnRow();
+                SpawnRowAt(_nextRowY);
+                _nextRowY += _tileHeight;
             }
 
-            foreach (var tile in _activeTiles)
-            {
-                tile.MoveDown(_tileSpeed);
-            }
+            float bottomVisibleY = -_containerRect.rect.height / 2f - _tileHeight;
 
-            _activeTiles.RemoveAll(t => t == null || !t.gameObject.activeSelf);
+            while (_rows.Count > 0)
+            {
+                float lowestRowY = _nextRowY - _rows.Count * _tileHeight;
+
+                if (lowestRowY + _rowsRoot.anchoredPosition.y >= bottomVisibleY)
+                    break;
+
+                var row = _rows.Dequeue();
+                for (int i = 0; i < row.Count; i++)
+                    row[i].ReturnToPool();
+            }
         }
 
-        private void SpawnRow()
+        private void SpawnRowAt(float y)
         {
-            float startY = _containerRect.rect.height / 2 + _tileHeight / 2;
+            var row = new List<Tile>(TilesPerRow);
 
-            for (int i = 0; i < _tilesPerRow; i++)
+            float leftX = -_containerRect.rect.width / 2f + _tileWidth / 2f;
+
+            for (int i = 0; i < TilesPerRow; i++)
             {
-                GameObject tileObj = _tilePool.GetObject(_spawnParent);
+                GameObject tileObj = _tilePool.GetObject(_rowsRoot);
+                RectTransform rt = tileObj.GetComponent<RectTransform>();
+                rt.SetParent(_rowsRoot, false);
 
-                float x = -_containerRect.rect.width / 2 + _tileWidth / 2 + i * _tileWidth;
-                tileObj.transform.localPosition = new Vector3(x, startY, 0);
+                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = new Vector2(_tileWidth, _tileHeight);
 
-                if (tileObj.TryGetComponent(out RectTransform rt))
-                {
-                    rt.sizeDelta = new Vector2(_tileWidth, _tileHeight);
-                    rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
-                }
+                float x = leftX + i * _tileWidth;
 
-                Tile tile = tileObj.GetComponent<Tile>();
-                tile.Initialize(GetRandomTileType(), _tilePool, _tileHeight);
-                _activeTiles.Add(tile);
+                rt.anchoredPosition = new Vector2(SnapToPixel(x), SnapToPixel(y));
+
+                var tile = tileObj.GetComponent<Tile>();
+                tile.Initialize(GetRandomTileType(), _tilePool);
+                row.Add(tile);
             }
+
+            _rows.Enqueue(row);
+        }
+
+        private void ClearAllRows()
+        {
+            while (_rows.Count > 0)
+            {
+                var row = _rows.Dequeue();
+                for (int i = 0; i < row.Count; i++)
+                    row[i].ReturnToPool();
+            }
+        }
+
+        private void SnapSizesToPixelGrid()
+        {
+            _tileWidth = SnapToPixel(_tileWidth);
+            _tileHeight = SnapToPixel(_tileHeight);
+        }
+
+        private float SnapToPixel(float v)
+        {
+            float sf = (_canvas != null && _canvas.isRootCanvas) ? _canvas.scaleFactor : 1f;
+            if (sf <= 0f) sf = 1f;
+            return Mathf.Round(v * sf) / sf;
         }
 
         private TileType GetRandomTileType()

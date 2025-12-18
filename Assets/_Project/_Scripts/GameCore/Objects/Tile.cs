@@ -14,13 +14,11 @@ namespace GameCore.Objects
 
         private TileType _type;
         private ObjectPool _pool;
-        private float _tileHeight;
 
-        public void Initialize(TileType type, ObjectPool pool, float tileHeight)
+        public void Initialize(TileType type, ObjectPool pool)
         {
             _type = type;
             _pool = pool;
-            _tileHeight = tileHeight;
 
             switch (_type)
             {
@@ -36,24 +34,14 @@ namespace GameCore.Objects
                 case TileType.Empty1:
                 case TileType.Empty2:
                 case TileType.Empty3:
-                    int index = (int)_type - (int)TileType.Empty1;
-                    _image.sprite = _emptySprites[index];
+                    _image.sprite = _emptySprites[(int)_type - (int)TileType.Empty1];
                     break;
             }
         }
 
-        public void MoveDown(float speed)
+        public void ReturnToPool()
         {
-            transform.localPosition += Vector3.down * speed * Time.deltaTime;
-
-            var parentRect = transform.parent as RectTransform;
-            float containerHeight = parentRect != null ? parentRect.rect.height : Screen.height;
-            float destroyThreshold = -containerHeight / 2 - _tileHeight;
-
-            if (transform.localPosition.y < destroyThreshold)
-            {
-                _pool.ReturnObject(gameObject);
-            }
+            _pool.ReturnObject(gameObject);
         }
 
         public void OnPointerClick(PointerEventData eventData)
@@ -65,12 +53,14 @@ namespace GameCore.Objects
                 case TileType.ChickenWhite:
                     GameManager.Instance.FinishGame();
                     break;
+
                 case TileType.ChickenBlack:
                 case TileType.ChickenGray:
                     GameManager.Instance.AddPoints(1);
                     _type = TileType.ChickenWhite;
                     _image.sprite = _whiteChicken;
                     break;
+
                 case TileType.Empty1:
                 case TileType.Empty2:
                 case TileType.Empty3:
